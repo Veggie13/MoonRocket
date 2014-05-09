@@ -6,23 +6,19 @@ using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Windows.Forms;
-using System.Runtime.InteropServices;
 
 namespace MoonRocket
 {
     public partial class Form1 : Form
     {
-        [DllImport("user32.dll")]
-        static extern short GetKeyState(int nVirtKey);
-
         private Timer _timer = new Timer();
 
         const double _G = 6.673e-11;
-        const double _tickLen = 2;
+        const double _tickLen = 10;
         readonly PointD _earthP = new PointD(0, 0), _moonP = new PointD(384399000, 0);
         const double _earthR = 6378100, _earthM = 5.9742e24;
         const double _moonR = 1737100, _moonM = 7.3477e22;
-        const double _crashVN = 20, _crashVO = 2, _crashVA = Math.PI / 36;
+        const double _crashVN = 100, _crashVO = 10, _crashVA = Math.PI / 36;
         const double _rocketT = 20, _rocketStartAngle = Math.PI, _rocketAT = Math.PI / 18000;
         const double _landAngleTolerance = Math.PI / 6;
 
@@ -32,14 +28,8 @@ namespace MoonRocket
             public double _rocketA, _rocketVA;
         }
 
-        bool _thrust, _turnCW, _turnCCW, _path;
-        RectangleF _screen
-        {
-            get { return _screens[_nScreen]; }
-        }
-        RectangleF[] _screens = new RectangleF[4];
-        int _nScreen = 0;
-
+        bool _thrust, _turnCW, _turnCCW;
+        RectangleF _screen;
         Form2 _info;
         State _s
         {
@@ -47,7 +37,7 @@ namespace MoonRocket
             set { _next[_cur] = value; }
         }
         int _cur = 0;
-        State[] _next = new State[5000];
+        State[] _next = new State[1000];
         object _locker = new object();
 
         public Form1()
@@ -62,30 +52,30 @@ namespace MoonRocket
             _thrust = false;
             _turnCW = false;
             _turnCCW = false;
-            _path = false;
 
             Activated += new EventHandler(Form1_Activated);
             Paint += new PaintEventHandler(Form1_Paint);
-            SizeChanged += new EventHandler(Form1_SizeChanged);
+            KeyDown += new KeyEventHandler(Form1_KeyDown);
 
             _info = new Form2();
             _info.Paint += new PaintEventHandler(_info_Paint);
 
             _timer.Tick += new EventHandler(_timer_Tick);
-            _timer.Interval = 50;
+            _timer.Interval = 250;
 
             this.DoubleBuffered = true;
         }
 
-        void Form1_SizeChanged(object sender, EventArgs e)
+        void Form1_KeyDown(object sender, KeyEventArgs e)
         {
-            if (DisplayRectangle.Width < DisplayRectangle.Height)
+            lock (_locker)
             {
-                Height -= (DisplayRectangle.Height - DisplayRectangle.Width);
-            }
-            else if (DisplayRectangle.Height < DisplayRectangle.Width)
-            {
-                Width -= (DisplayRectangle.Width - DisplayRectangle.Height);
+                if (e.KeyCode == Keys.Space)
+                    _thrust = true;
+                if (e.KeyCode == Keys.Right)
+                    _turnCW = true;
+                if (e.KeyCode == Keys.Left)
+                    _turnCCW = true;
             }
         }
 
@@ -126,12 +116,12 @@ namespace MoonRocket
             lock (_locker)
             {
                 Point rocketP, rocketP2;
-                for (int i = _next.Length - 6; _path && i > _cur; i -= 5)
+                for (int i = _next.Length - 2; i > _cur; i--)
                 {
-                    if (_next[i + 5] == null)
+                    if (_next[i + 1] == null)
                         continue;
                     rocketP = Transform(_next[i]._rocketP.X, _next[i]._rocketP.Y);
-                    rocketP2 = Transform(_next[i + 5]._rocketP.X, _next[i + 5]._rocketP.Y);
+                    rocketP2 = Transform(_next[i + 1]._rocketP.X, _next[i + 1]._rocketP.Y);
                     g.DrawLine(p1, rocketP, rocketP2);
                 }
                 if (_cur >= _next.Length || _next[_cur] == null)
@@ -150,19 +140,11 @@ namespace MoonRocket
         void Form1_Activated(object sender, EventArgs e)
         {
             RecomputeAll();
-            {
-                double width = _moonP.X + 3 * (_earthR + _moonR);
-                double ratio = (double)DisplayRectangle.Height / (double)DisplayRectangle.Width;
-                double height = ratio * width;
-                _screens[0] = new RectangleF(-3f * (float)_earthR, -0.5f * (float)height, (float)width, (float)height);
-            }
-            {
-                _screens[1] = new RectangleF(-2f * (float)_earthR, -2f * (float)_earthR, 4f * (float)_earthR, 4f * (float)_earthR);
-            }
-            {
-                _screens[2] = new RectangleF((float)_moonP.X - 2f * (float)_moonR, (float)_moonP.Y - 2f * (float)_moonR, 4f * (float)_moonR, 4f * (float)_moonR);
-            }
-
+            /*double width = _moonP.X + 3 * (_earthR + _moonR);
+            double ratio = (double)DisplayRectangle.Height / (double)DisplayRectangle.Width;
+            double height = ratio * width;
+            _screen = new RectangleF(-3f * (float)_earthR, -0.5f * (float)height, (float)width, (float)height);*/
+            _screen = new RectangleF(-2f * (float)_earthR, -2f * (float)_earthR, 4f * (float)_earthR, 4f * (float)_earthR);
             bm = new Bitmap(DisplayRectangle.Width, DisplayRectangle.Height);
 
             _info.Show();
@@ -324,42 +306,9 @@ namespace MoonRocket
             }
         }
 
-        float _zoomWidth = (float)Math.Pow(2, 15);
-        void SetupRocketScreen()
-        {
-            _screens[3] = new RectangleF((float)_s._rocketP.X - _zoomWidth / 2, -(float)_s._rocketP.Y - _zoomWidth / 2, _zoomWidth, _zoomWidth);
-        }
-
-        const int VK_LEFT = 0x25;
-        const int VK_UP = 0x26;
-        const int VK_RIGHT = 0x27;
-        const int VK_SPACE = 0x20;
-        const int VK_ADD = 0x6B;
-        const int VK_SUBTRACT = 0x6D;
-        const int cP = 0x50;
         int _counter = 0;
         void _timer_Tick(object sender, EventArgs e)
         {
-            short up = GetKeyState(VK_UP);
-            short left = GetKeyState(VK_LEFT);
-            short right = GetKeyState(VK_RIGHT);
-            short space = GetKeyState(VK_SPACE);
-            short plus = GetKeyState(VK_ADD);
-            short minus = GetKeyState(VK_SUBTRACT);
-            short P = GetKeyState(cP);
-            _thrust = (up < 0);
-            _turnCCW = (left < 0);
-            _turnCW = (right < 0);
-            _path ^= (P < 0);
-            if (plus < 0)
-            {
-                _zoomWidth /= 2;
-            }
-            if (minus < 0)
-            {
-                _zoomWidth *= 2;
-            }
-
             lock (_locker)
             {
                 if (_thrust || _turnCCW || _turnCW || _cur + 1 >= _next.Length)
@@ -376,17 +325,10 @@ namespace MoonRocket
                     _timer.Stop();
                     return;
                 }
-
             }
 
-            if (_counter++ % 4 == 0)
+            //if (_counter++ % 4 == 0)
             {
-                if (space < 0)
-                {
-                    _nScreen++;
-                    _nScreen %= _screens.Length;
-                }
-                SetupRocketScreen();
                 Invalidate();
                 _info.Invalidate();
             }

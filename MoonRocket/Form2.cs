@@ -14,7 +14,6 @@ namespace MoonRocket
         public Form2()
         {
             InitializeComponent();
-            this.DoubleBuffered = true;
         }
     }
 }
